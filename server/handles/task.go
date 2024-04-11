@@ -1,8 +1,11 @@
 package handles
 
 import (
+	"math"
+
 	"github.com/alist-org/alist/v3/internal/fs"
 	"github.com/alist-org/alist/v3/internal/offline_download/tool"
+	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
 	"github.com/xhofe/tache"
@@ -22,22 +25,23 @@ func getTaskInfo[T tache.TaskWithInfo](task T) TaskInfo {
 	if task.GetErr() != nil {
 		errMsg = task.GetErr().Error()
 	}
+	progress := task.GetProgress()
+	// if progress is NaN, set it to 100
+	if math.IsNaN(progress) {
+		progress = 100
+	}
 	return TaskInfo{
 		ID:       task.GetID(),
 		Name:     task.GetName(),
 		State:    task.GetState(),
 		Status:   task.GetStatus(),
-		Progress: task.GetProgress(),
+		Progress: progress,
 		Error:    errMsg,
 	}
 }
 
 func getTaskInfos[T tache.TaskWithInfo](tasks []T) []TaskInfo {
-	var infos []TaskInfo
-	for _, t := range tasks {
-		infos = append(infos, getTaskInfo(t))
-	}
-	return infos
+	return utils.MustSliceConvert(tasks, getTaskInfo[T])
 }
 
 func taskRoute[T tache.TaskWithInfo](g *gin.RouterGroup, manager *tache.Manager[T]) {
@@ -47,6 +51,15 @@ func taskRoute[T tache.TaskWithInfo](g *gin.RouterGroup, manager *tache.Manager[
 	})
 	g.GET("/done", func(c *gin.Context) {
 		common.SuccessResp(c, getTaskInfos(manager.GetByState(tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)))
+	})
+	g.POST("/info", func(c *gin.Context) {
+		tid := c.Query("tid")
+		task, ok := manager.GetByID(tid)
+		if !ok {
+			common.ErrorStrResp(c, "task not found", 404)
+			return
+		}
+		common.SuccessResp(c, getTaskInfo(task))
 	})
 	g.POST("/cancel", func(c *gin.Context) {
 		tid := c.Query("tid")
